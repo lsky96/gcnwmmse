@@ -6,7 +6,6 @@ import math
 import torch
 import comm.mathutil as util
 import comm.channel as channel
-import numpy as np
 
 
 def downlink_mrc(scenario):
@@ -542,7 +541,6 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
                 partial_covariance_mats = util.cmat_square(partial_covariance_mats)
                 dl_covariance_mat = dl_covariance_mat + partial_covariance_mats.sum(dim=0)
 
-
             # U = INV * H * V
             inv_cov_mat = util.clean_hermitian(torch.linalg.inv(util.clean_hermitian(dl_covariance_mat)))  # second clean did not help
             user_channel = channels[assigned_bs[i_user]][i_user]
@@ -598,13 +596,7 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
                 aux_assigned_user_mat.append(aux_assigned_user_mat_temp)
             aux_assigned_user_mat = torch.stack(aux_assigned_user_mat, dim=0).sum(dim=0)
 
-            use_np_eval = False
-            if use_np_eval:
-                eval, evec = np.linalg.eigh(ul_cov_mat_temp.numpy())
-                eigenval_temp, eigenvec_temp = torch.tensor(eval), torch.tensor(evec)
-            else:
-                eigenval_temp, eigenvec_temp = torch.linalg.eigh(ul_cov_mat_temp)
-
+            eigenval_temp, eigenvec_temp = torch.linalg.eigh(ul_cov_mat_temp)
             eigenvec_temp = eigenvec_temp.unsqueeze(0).transpose(0, -1)  # .type(torch.complex64)  # the matrix dim now only hold single eigenvecs, while dim 0 now iterates over different eigenvecs, so (M, *batchdim, M, 1)
             nominator_coeff = util.mmchain(eigenvec_temp.conj().transpose(-2, -1), aux_assigned_user_mat.unsqueeze(0), eigenvec_temp).real.squeeze(-1).squeeze(-1)  # dim 0 of size M holds coefficients, so (M, *batch_size, 1)
             nominator_coeff = nominator_coeff / bss_maxpow[..., i_bs].expand(1, *batch_size)

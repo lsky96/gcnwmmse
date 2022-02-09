@@ -7,6 +7,9 @@ import comm.channel
 import comm.algorithm as algo
 
 DATADIR = os.path.join(os.getcwd(), "data")
+RUN_NAME = "gcnwmmse_example"
+MODEL_NAME = "GCNWMMSE"
+TESTDATA_PATH = os.path.join(DATADIR, "testdata", "exampledata_3BSs_9UEs")
 
 
 def gcnwmmse_example_training():
@@ -14,9 +17,6 @@ def gcnwmmse_example_training():
     Note that depending on the values for testdata_num_iter, testdata_num_inits, generating data
     """
     max_num_training_steps = 100
-    run_name = "gcnwmmse_example"
-    model_name = "GCNWMMSE"
-    testdata_path = os.path.join(DATADIR, "testdata", "exampledata_3BSs_9UEs")
 
     model_parameters = {
             "num_layers": 7,
@@ -51,8 +51,8 @@ def gcnwmmse_example_training():
 
     # initialize run
     t = trainer.GeneralTrainer(
-                 model_name=model_name,
-                 run=run_name,
+                 model_name=MODEL_NAME,
+                 run=RUN_NAME,
                  model_hyperparam=model_parameters,
                  learning_datagen_type=data_gen_type,
                  learning_datagen_param=data_gen_param,
@@ -62,8 +62,8 @@ def gcnwmmse_example_training():
                  layer_parameter_schedule=None,
                  lossfun="rate_samplenorm",
                  lossfun_layers=[-1],
-                 testdata_generate=True,
-                 testdata_path=testdata_path,
+                 testdata_generate=True,  # to create testdata at testdata_path
+                 testdata_path=TESTDATA_PATH,
                  testdata_gen_type=data_gen_type,
                  testdata_gen_param=data_gen_param,
                  testdata_batch_size=[10],
@@ -75,10 +75,19 @@ def gcnwmmse_example_training():
                  device=torch.device("cpu"),
                  )
     t.run_learning_upto_step(max_num_training_steps)
-    # Upon completion, trainer class will export training statistics into run dir, otherwise use tensorboard.
+    # Upon completion, trainer class will export training statistics into run dir, tensorboard is also supported.
 
-    t.evaluate_on_test_set(testdata_path)
+
+def gcnwmmse_example_test():
+    t = trainer.GeneralTrainer(
+        model_name=MODEL_NAME,
+        run=RUN_NAME,
+        rootdir=DATADIR,
+        device=torch.device("cpu"),
+    )
+    t.evaluate_on_test_set(TESTDATA_PATH)
 
 
 if __name__ == "__main__":
     gcnwmmse_example_training()
+    gcnwmmse_example_test()

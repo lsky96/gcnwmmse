@@ -265,7 +265,6 @@ def siso_adhoc_2dscene(num_pairs, noise_pow=-92, pathloss_coefficient=2.2, densi
 
     def sample_fast_fading(large_scale_fading_chan, sigma=1):
         # num_pairs = large_scale_fading_chan.size()[-1]
-        # fast_fading = np.random.rayleigh(rscale, size=[*batch_size, num_pairs, num_pairs])
         # fast_fading = torch.tensor(fast_fading, dtype=ctype, device=device)
         fast_fading = sigma * util.randcn(*batch_size, num_pairs, num_pairs, dtype=dtype, device=device) * (2**(1/2))  # in order to make sigma consistent in sense of Rayleigh(sig)
         sampled_channel = large_scale_fading_chan * fast_fading

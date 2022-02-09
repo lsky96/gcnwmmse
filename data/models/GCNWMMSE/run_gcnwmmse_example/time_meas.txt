@@ -1,0 +1,2 @@
+Data Generation [s]: 119.6331467628479
+Learning run 101[s]: 154.46428442001343

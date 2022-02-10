@@ -1,10 +1,7 @@
 import torch
-from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 import comm.mathutil as util
-import comm.algorithm as algo
-from typing import Optional
 
 
 class GCN(nn.Module):

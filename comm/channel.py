@@ -10,14 +10,13 @@ def mimoifc_randcn(bss_dim, users_dim, assignment, batch_size=[], snr=0, weights
                    device=torch.device("cpu")):
     """
     Generates batches of random channel vectors of a MIMO IFC and returns dict per convention.
-    :param bss_dim: iterable, contains array sizes of K BSs (equal for all batches)
-    :param users_dim: iterable of iterables, which contain array sizes of users (equal for all batches)
+    :param bss_dim: iterable, contains antenna numbers of K BSs (equal for all batches)
+    :param users_dim: iterable of iterables, which contain antenna numbers of users (equal for all batches)
     :param assignment: iterable of size len(rx) containing indices assigning each user to a BS (equal for all batches)
     :param snr: iterable or scalar of snr in dB per base station, results in return max powers of 10^(SNR/10), see WMMSE paper, broadcastable to (batch_size, num_bss)
     :param weights: iterable of weights for rates per user or scalar, technically not a channel property, broadcastable to (batch_size, num_users)
     :param interference_ratio: average linear channel gain ratio between direct and interference channels (broadcastable to (batch_size))
     :param device: device to assign tensors to
-    :param precision: double or single for float point values
 
     :return: dictionary, containing
         channels: iterable of K iterables, each containing all channel matrix tensors from the corresponding BS to each user
@@ -93,9 +92,10 @@ def mimoifc_randcn(bss_dim, users_dim, assignment, batch_size=[], snr=0, weights
 def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance=500, bss_pow=40, noise_pow=-120, weights=1, cell_model="pico", csi_noise=None,
                    device=torch.device("cpu")):
     """
-    Generates batches of random channel vectors of a MIMO IFC and returns dict per convention.
-    :param bss_dim: iterable, contains array sizes of K BSs (equal for all batches)
-    :param users_dim: iterable of iterables, which contain array sizes of users (equal for all batches)
+    Generates batches of random channel vectors of a MIMO IFC and returns dict per convention. Scenario consists of 3BSs
+    arranged in a equilateral triangle, users placed in the sextant closest to their assigned BSs.
+    :param bss_dim: iterable, contains antenna numbers of 3 BSs (equal for all batches)
+    :param users_dim: iterable of iterables, which contain antenna numbers of users (equal for all batches)
     :param assignment: iterable of size len(rx) containing indices assigning each user to a BS (equal for all batches)
     :param batch_size:
     :param bs_distance: distance of BSs from each other in
@@ -103,7 +103,6 @@ def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance
     :param noise_pow: noise power at each antenna of UE, broadcastable to (batch_size, num_users)
     :param weights: iterable of weights for rates per user or scalar, technically not a channel property, broadcastable to (batch_size, num_users)
     :param device: device to assign tensors to
-    :param precision: double or single for float point values
 
     :return: dictionary, containing
         channels: iterable of K iterables, each containing all channel matrix tensors from the corresponding BS to each user
@@ -249,9 +248,21 @@ def siso_adhoc_2dscene(num_pairs, noise_pow=-92, pathloss_coefficient=2.2, densi
         randomly drawn density between density[0] and density[1].
     :param batch_size: Size of batch realization.
     :param device: Compute device.
-    :param precision: "single" or "double".
-    :return:
+    :return: dictionary, containing
+        channels: iterable of K iterables, each containing all channel matrix tensors from the corresponding BS to each user
+        bss_assign: iterable of K tensors containing the indices of the assigned users
+        users_assign: tensor of size I containing the integers of the assigned BS index for the corresponding user
+        tx_pow: size K tensor containing the power budgets for the base stations
+        users_noise_pow: tensor of size I containing the noise power of the corresponding user
+        rweights: size I tensor containing the rate weights for the individual users
+        num_bss: number of basestations
+        num_users: number of users
+        bss_dim: tensor containing the BS array sizes
+        users_dim: tensor containing the user array sizes
+        batch_size: list containing batch dimensions
+        device: device on which tensors are stored
     """
+
     def large_scale_fading(tx_pos, rx_pos, pathloss_coeff):
         # num_pairs = tx_pos.size()[0]
         large_scale_fading_channel = torch.zeros(*batch_size, num_pairs, num_pairs, **factory_kwargs)

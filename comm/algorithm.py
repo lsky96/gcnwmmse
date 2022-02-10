@@ -114,10 +114,11 @@ def downlink_randn_bf(scenario, bf_samples=0):
 
 def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=True):
     """
+    Implementation of WMMSE algorithm
     :param scenario:
-    :param init_dl_beamformer: iterable of matrices, initial guess for the downlink beamformer, matrices are in batch-form
+    :param init_dl_beamformer: iterable of matrices (*, M, N), initial guess for the downlink beamformer
     :param num_iter: number of iterations
-    :return:
+    :return: v,u,w - iterable of matrices (num_iter, *, M, N), bss_pow - array (num_iter, *, K)
     """
     debug = False
     num_layer = num_iter
@@ -270,7 +271,7 @@ def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=
             i_bs = assigned_bs[i_user]
             v[i_user][i_layer+1] = v[i_user][i_layer+1] * correction_factor[..., i_bs].unsqueeze(-1).unsqueeze(-1)
 
-    # Stack matrices and check power
+    # Stack matrices over layers and and calculate power
     bss_pow = torch.zeros(num_bss, num_layer+1, *batch_size, device=device)
     for i_user in range(num_users):
         v[i_user] = torch.stack(v[i_user], dim=0)
@@ -478,9 +479,9 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
     WMMSE algorithm that completely avoids the eigendecomposition, but finds mu
     by calculating the power directly and performing bisection search (more reliable for #TxAnt > #RxAnt).
     :param scenario:
-    :param init_dl_beamformer: iterable of matrices, initial guess for the downlink beamformer, matrices are in batch-form
+    :param init_dl_beamformer: iterable of matrices (*, M, N), initial guess for the downlink beamformer
     :param num_iter: number of iterations
-    :return:
+    :return: v,u,w - iterable of matrices (num_iter, *, M, N), bss_pow - array (num_iter, *, K)
     """
     num_layer = num_iter
 
@@ -503,8 +504,6 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
     batch_size = list(init_dl_beamformer[0].size())[0:-2]
     batch_ndim = init_dl_beamformer[0].ndim - 2  # num dimension before matrix dimensions
     expand_dim = [1] * batch_ndim
-
-    rtype = scenario["bss_pow"].dtype
 
     # prepare and expand channels
     channels = []
@@ -652,8 +651,9 @@ def downlink_wmmse_sisoadhoc(scenario, init_dl_beamformer=[], num_iter=100, show
     """
     WMMSE algorithm optimized for wireless topologies with TX-RX pairs and scalar channels.
     :param scenario:
-    :param init_dl_beamformer: iterable, initial guess for the downlink beamformer, matrices are in batch-form
+    :param init_dl_beamformer: iterable of matrices (*, 1, 1), initial guess for the downlink beamformer
     :param num_iter: number of iterations
+    :return: v,u,w - iterable of matrices (num_iter, *, 1, 1), bss_pow - array (num_iter, *, K)
     :return:
     """
     def scenario_extraction(scenario):

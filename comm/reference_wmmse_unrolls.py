@@ -1,5 +1,6 @@
 """
-Extended and reconfigurable reimplementations of IAIDNN, UWMMSE, Unfolded PGD network architectures in PyTorch.
+Extended and reconfigurable implementations of IAIDNN, UWMMSE, Unfolded PGD network architectures in PyTorch. See below
+for works on which the code is based.
 UWMMSE: Chowdhury et al. - 2020 - Unfolding WMMSE using Graph Neural Networks for Efficient Power Allocation
 Unfolded PGD: Pellaco et al. - 2020 - Iterative Algorithm Induced Deep-Unfolding Neural Networks: Precoding Design for Multiuser MIMO Systems
 IAIDNN: Hu et al. - 2021 - Iterative Algorithm Induced Deep-Unfolding Neural Networks: Precoding Design for Multiuser MIMO Systems
@@ -131,14 +132,6 @@ class UWMMSELayer(nn.Module):
         self.gcn_b = network.GCN(self.gcn_features, self.num_gcn_layers, 2, self.gcn_act, weightinit="glorot", biasinit=0.1)
 
     def forward(self, channel_mat, user_noise_pow, bss_pow, v_in):
-        """
-
-        :param channel_mat:
-        :param user_noise_pow:
-        :param bss_pow:
-        :param v: (*batch_size, num_pairs, 1)
-        :return:
-        """
         eps = 1e-12
 
         def u_step(channel_mat, user_noise_pow, v):
@@ -378,7 +371,7 @@ class IAIDNNLayer(nn.Module):
         dtype = torch.float64
         ctype = torch.complex128
 
-        # see reference code
+        # These values are obtained from the original authors codebase for a faithful implementation.
         scale_X = 0.1
         if improved:
             scale_Y = 0.1

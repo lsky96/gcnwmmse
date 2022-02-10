@@ -1,5 +1,5 @@
 % Script to construct a Mx2 MIMO multicell scenario batch from a DeepMIMO
-% Dataset.
+% Dataset. Splits scenarios into training and test samples.
 % Requires DeepMIMO_Dataset_Generator from the DeepMIMO source in folder.
 [DeepMIMO_dataset,params]=DeepMIMO_Dataset_Generator();
 

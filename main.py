@@ -14,7 +14,8 @@ TESTDATA_PATH = os.path.join(DATADIR, "testdata", "exampledata_3BSs_9UEs")
 
 def gcnwmmse_example_training():
     """
-    Note that depending on the values for testdata_num_iter, testdata_num_inits, generating data
+    Note that depending on the values for testdata_num_iter, testdata_num_inits, generating data might take significant
+    time.
     """
     max_num_training_steps = 100
 
@@ -49,7 +50,7 @@ def gcnwmmse_example_training():
         "gamma": 1 / 10,
     }
 
-    # initialize run
+    # initialize run, checkpoint and training progress stored in rootdir\model_name\run
     t = trainer.GeneralTrainer(
                  model_name=MODEL_NAME,
                  run=RUN_NAME,
@@ -75,7 +76,7 @@ def gcnwmmse_example_training():
                  device=torch.device("cpu"),
                  )
     t.run_learning_upto_step(max_num_training_steps)
-    # Upon completion, trainer class will export training statistics into run dir, tensorboard is also supported.
+    # Upon completion, trainer class will export training progress into run directory, tensorboard is also supported.
 
 
 def gcnwmmse_example_test():
@@ -85,6 +86,7 @@ def gcnwmmse_example_test():
         rootdir=DATADIR,
         device=torch.device("cpu"),
     )
+    # Results are stored in run directory
     t.evaluate_on_test_set(TESTDATA_PATH)
 
 

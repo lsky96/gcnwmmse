@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import comm.algorithm as algo
 import comm.mathutil as util
 import comm.network as network
-import comm.models as models
+import comm.architectures as models
 from typing import Optional
 
 

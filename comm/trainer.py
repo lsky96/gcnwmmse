@@ -1,5 +1,4 @@
 import os
-import time
 import math
 import random
 import torch
@@ -8,8 +7,7 @@ import torch.nn as nn
 import comm.channel as channel
 import comm.algorithm as algo
 import comm.lossfun as lossfun
-import comm.models as models
-import comm.mathutil as util
+import comm.architectures as models
 import numpy as np
 import matplotlib.pyplot as plt
 import datawriter
@@ -35,7 +33,7 @@ class Trainer:
             self.rootdir = os.getcwd()
         else:
             self.rootdir = rootdir
-        self.dir = os.path.join(self.rootdir, "models", model_name, "run_" + run)
+        self.dir = os.path.join(self.rootdir, model_name, "run_" + run)
         print(self.dir)
         self.trainer_config_path = os.path.join(self.dir, "trainer")
         self.model_config_path = os.path.join(self.dir, "model")
@@ -226,7 +224,7 @@ class GeneralTrainer(Trainer):
         :param validation_every_num_step:
         :param testdata_generate: set to True to generate testdata at step 0 at location testdata_path
         :param testdata_path: path to testdata
-        :param testdata_gen_type: mimoifc_randcn, mimoifc_triangle, siso_adhoc_2d, load_from_file (dict must contain
+        :param testdata_gen_type: mimoifc_randcn, mimoifc_triangle, siso_adhoc_2d, deepmimo, load_from_file (dict must contain
             path and num_samples)
         :param testdata_gen_param: dictionary containing params passed to validation scenario factory function
         :param testdata_batch_size: iterable of int

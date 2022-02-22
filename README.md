@@ -1,5 +1,5 @@
 # GCN-WMMSE
-This library contains the code for the research paper [Coordinated Multicell MU-MIMO Beamforming Using Deep WMMSE Algorithm Unrolling](https://github.com/lsky96/gcnwmmse).
+This library contains the code for the research paper [Coordinated Multicell MU-MIMO Beamforming Using Deep WMMSE Algorithm Unrolling](https://arxiv.org/abs/2202.10371).
 
 ## Requirements
 - Python 3.9
@@ -33,7 +33,7 @@ An example script to perform a training run for a GCN-WMMSE network and a valida
 The code supports the [DeepMIMO](https://deepmimo.net/) data set. The MATLAB scripts inside ```deepmimo\datagen``` generate ```.mat```-files that can be imported by ```comm\channels.deepmimo```. The scripts require the ```DeepMIMO_Dataset_Generator``` class supplied in the DeepMIMO dataset (which is not distributed by this library). After creation of the ```.mat``` files, use the ```deepmimo``` data type/channel type and supply the path to a ```.mat``` to generate a scenario batch that can be used for training or testing.
 
 ## Usage
-Please cite the paper "Schynol et al. - Coordinated Multicell MU-MIMO Beamforming Using Deep  WMMSE Algorithm Unrolling" [1](https://github.com/lsky96/gcnwmmse) if you apply this library in you own work. If you use the reference architectures, please cite the respective works as well.
+Please cite the paper "Schynol et al. - Coordinated Multicell MU-MIMO Beamforming Using Deep  WMMSE Algorithm Unrolling" [1](https://arxiv.org/abs/2202.10371) if you apply this library in you own work. If you use the reference architectures, please cite the respective works as well.
 
 ## References
 This paper provides extended PyTorch implementations for the algorithms and architectures of the following works:

@@ -4,8 +4,16 @@ For WMMSE, see Shi et al. - 2011 - An Iteratively Weighted MMSE Approach to Dist
 
 import math
 import torch
+import torch.optim as optim
+import torch.nn as nn
+import torch.nn.functional as F
 import comm.mathutil as util
 import comm.channel as channel
+import numpy as np
+
+
+USE_PSEUDOINV = True
+PSEUDOINV_SVAL_THRESH = 1e-12
 
 
 def downlink_mrc(scenario):
@@ -32,13 +40,19 @@ def downlink_mrc(scenario):
         i_bs = users_assign[i_user]
         dl_beamformers[i_user] = dl_beamformers[i_user] * torch.sqrt(bss_maxpow[..., i_bs] / bss_pow[..., i_bs]).unsqueeze(-1).unsqueeze(-1)
 
+    # print(torch.sqrt(bss_maxpow / bss_pow))
+    """
+    for i_user in range(num_users):
+        i_bs = users_assign[i_user]
+        bss_pow2[i_bs] += util.btrace(util.cmat_square(dl_beamformers[i_user])).real
+    print(bss_pow2)
+    """
+
     return dl_beamformers
 
 
 def downlink_zf_bf(scenario, mode="standard"):
-    """
-    Naive ZF beamformer, inverse potentially unstable. If mode is "iaidnn", power will not be normalized, as in IAIDNN reference code.
-    """
+    """Naive ZF beamformer, inverse potentially unstable. If mode is "iaidnn", power will not be normalized, as in IAIDNN reference code."""
     num_users = scenario["num_users"]
     num_bss = scenario["num_bss"]
     bss_assign = scenario["bss_assign"]
@@ -114,11 +128,10 @@ def downlink_randn_bf(scenario, bf_samples=0):
 
 def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=True):
     """
-    Implementation of WMMSE algorithm
     :param scenario:
-    :param init_dl_beamformer: iterable of matrices (*, M, N), initial guess for the downlink beamformer
+    :param init_dl_beamformer: iterable of matrices, initial guess for the downlink beamformer, matrices are in batch-form
     :param num_iter: number of iterations
-    :return: v,u,w - iterable of matrices (num_iter, *, M, N), bss_pow - array (num_iter, *, K)
+    :return:
     """
     debug = False
     num_layer = num_iter
@@ -147,6 +160,8 @@ def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=
 
     # prepare and expand channels
     channels = []
+    # channels_batch_ndim = scenario["channels"][0][0].ndim
+    # channels_expand_dim_remaining = [1] * (batch_ndim - channels_batch_ndim)
     for i_bs in range(num_bss):
         channels.append([])
         for i_user in range(num_users):
@@ -165,6 +180,12 @@ def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=
             print("\rIteration {}...".format(i_layer+1), end="", flush=True)
 
         # MMSE: U + W for every user
+        """
+        v_square = []  # is V * V^H
+        for i_user in range(num_users):
+            v_square.append(util.cmat_square(v[i_user][i_layer]))
+        """
+
         # U * W * U^H is equal for every BS, it will be calculated concurrently as preparation for calculation of V
         uwu = []
         v_tilde = []  # preps for calc of V
@@ -190,10 +211,13 @@ def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=
             u_temp = torch.matmul(u_temp, v[i_user][i_layer])
             u[i_user].append(u_temp)
 
+            if debug:
+                print("Symbol-cov", u_temp.conj().transpose(-2, -1) @ dl_covariance_mat @ u_temp)
             # W = INV(I - U^H * H * V)
             w_inv = torch.matmul(u_temp.conj().transpose(-2, -1), user_channel)
             w_inv = util.clean_hermitian(torch.matmul(w_inv, v[i_user][i_layer]))
             w_inv = eye - w_inv
+            # print(w_inv)
             w_temp = util.clean_hermitian(torch.linalg.inv(w_inv))
             w[i_user].append(w_temp)
 
@@ -240,7 +264,11 @@ def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=
             # Decomposition of SUM for Lagrangian
             eigenval_temp, eigenvec_temp = torch.linalg.eigh(ul_cov_mat_temp)
             eigenval_temp = torch.clamp(eigenval_temp, min=0)  # required for stability
-            eigenval_temp = eigenval_temp.movedim(-1, 0)  # .float()  # now dim 0 contains M eigenval, so (M, *batch_size, 1)
+
+            eigenval_temp2 = eigenval_temp
+            eigenvec_temp2 = eigenvec_temp
+
+            eigenval_temp = eigenval_temp.movedim(-1, 0)  # now dim 0 contains M eigenval, so (M, *batch_size)
             eigenvec_temp = eigenvec_temp.unsqueeze(0).transpose(0, -1)  # .type(torch.complex64)  # the matrix dim now only hold single eigenvecs, while dim 0 now iterates over different eigenvecs, so (M, *batchdim, M, 1)
             nominator_coeff = util.mmchain(eigenvec_temp.conj().transpose(-2, -1), aux_assigned_user_mat.unsqueeze(0), eigenvec_temp).real.squeeze(-1).squeeze(-1)  # dim 0 of size M holds coefficients, so (M, *batch_size, 1)
 
@@ -251,7 +279,15 @@ def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=
 
             # Compute inverse mat
             eye = torch.eye(bss_dim[i_bs], device=device).view(*expand_dim, bss_dim[i_bs], bss_dim[i_bs])
-            inv_augmented_ul_cov_mats_scaled.append(util.clean_hermitian(torch.linalg.inv(ul_cov_mat_scaled_temp + eye * mu_root.unsqueeze(-1).unsqueeze(-1))))
+            if USE_PSEUDOINV:
+                eigenval_loaded = eigenval_temp2 + mu_root.unsqueeze(-1)
+                eigenval_loaded_inv = 1 / eigenval_loaded
+                eigenval_loaded_inv[eigenval_loaded < PSEUDOINV_SVAL_THRESH] = 0
+                # print(eigenval_loaded.shape, mu_root.shape, eigenvec_temp.shape)
+
+                inv_augmented_ul_cov_mats_scaled.append(util.clean_hermitian((eigenvec_temp2 * eigenval_loaded_inv.unsqueeze(-2)) @ eigenvec_temp2.swapaxes(-2, -1).conj()))
+            else:
+                inv_augmented_ul_cov_mats_scaled.append(util.clean_hermitian(torch.linalg.inv(ul_cov_mat_scaled_temp + eye * mu_root.unsqueeze(-1).unsqueeze(-1))))
 
         # Calculation of V
         bss_current_pow = torch.zeros(*batch_size, num_bss, device=device)
@@ -271,7 +307,7 @@ def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=
             i_bs = assigned_bs[i_user]
             v[i_user][i_layer+1] = v[i_user][i_layer+1] * correction_factor[..., i_bs].unsqueeze(-1).unsqueeze(-1)
 
-    # Stack matrices over layers and and calculate power
+    # Stack matrices and check power
     bss_pow = torch.zeros(num_bss, num_layer+1, *batch_size, device=device)
     for i_user in range(num_users):
         v[i_user] = torch.stack(v[i_user], dim=0)
@@ -288,7 +324,42 @@ def downlink_wmmse(scenario, init_dl_beamformer=[], num_iter=50, show_iteration=
     return v, u, w, bss_pow
 
 
-def downlink_wmmse50(scenario, num_iter=100, num_trials=100, use_stable=True):
+def downlink_wmmse_results(scenario, init_dl_beamformer=[], num_iter=50):
+    if init_dl_beamformer:
+        batch_size = list(init_dl_beamformer[0].size())[:-2]
+    else:
+        batch_size = list(scenario["num_bss"].size())[:-1]
+    # batch_ndim = len(batch_size)
+
+    v, _, _, bss_pow_layers = downlink_wmmse(scenario, init_dl_beamformer=init_dl_beamformer, num_iter=num_iter)
+    _, wrates_layers = channel.downlink_sum_rate(scenario, v)
+    bss_pow_ratio_layers = bss_pow_layers / scenario["bss_pow"].unsqueeze(0)
+
+    return wrates_layers, bss_pow_layers, bss_pow_ratio_layers
+
+
+def downlink_wmmse_batchavg(scenario, init_dl_beamformer=[], num_iter=25):
+    if init_dl_beamformer:
+        batch_size = list(init_dl_beamformer[0].size())[:-2]
+    else:
+        batch_size = list(scenario["num_bss"].size())[:-1]
+    batch_ndim = len(batch_size)
+
+    v, _, _, bss_pow_layers = downlink_wmmse(scenario, init_dl_beamformer=init_dl_beamformer, num_iter=num_iter)
+    _, wrates_layers = channel.downlink_sum_rate(scenario, v)
+    bss_pow_ratio_layers = bss_pow_layers / scenario["bss_pow"].unsqueeze(0)
+    wrates_avg_layers = wrates_layers
+    bss_pow_avg_layers = bss_pow_layers
+    bss_pow_ratio_avg_layers = bss_pow_ratio_layers
+    for i_dim in range(batch_ndim):
+        wrates_avg_layers = torch.mean(wrates_avg_layers, dim=1)
+        bss_pow_avg_layers = torch.mean(bss_pow_avg_layers, dim=1)
+        bss_pow_ratio_avg_layers = torch.mean(bss_pow_ratio_avg_layers, dim=1)
+
+    return wrates_avg_layers, bss_pow_avg_layers, bss_pow_ratio_avg_layers
+
+
+def downlink_wmmse50(scenario, num_iter=100, num_trials=50, use_stable=True):
     """
     Performs WMMSE 100 with random initialization to find a semi-optimal rate and the average achieved rate by the WMMSE.
     :param scenario:
@@ -357,13 +428,13 @@ def downlink_wmmse50(scenario, num_iter=100, num_trials=100, use_stable=True):
            bss_pow_best_layers, bss_pow_ratio_best_layers
 
 
-def large_scenario_set_downlink_wmmse50(scenario, num_iter=100, num_trials=100, use_stable=True):
+def large_scenario_set_downlink_wmmse50(scenario, num_iter=100, num_trials=50, use_stable=True):
     """
     Automatically splits up a scenario batch and passes it to WMMSE50 due to memory constraints.
     """
     num_samples = scenario["channels"][0][0].size(0)  # scenario["batch_size"]
     bss_dim = scenario["bss_dim"][0].item()
-    num_trials_atonce = 100000 / (num_samples * num_iter * ((bss_dim**2) / 32))  # rough estimate to manage memory
+    num_trials_atonce = 100000 / (num_samples * num_iter * ((bss_dim**2) / 32))
 
     num_samples_atonce = math.floor(num_samples * num_trials_atonce)
     num_subsets = math.ceil(num_samples / num_samples_atonce)
@@ -372,7 +443,6 @@ def large_scenario_set_downlink_wmmse50(scenario, num_iter=100, num_trials=100, 
     bss_pow_best_layers, bss_pow_ratio_best_layers = [], [], [], [], [], []
     num_samples_computed = 0
     i_subset = 1
-
     while num_samples_computed < num_samples:
         run_num_samples = min(num_samples_atonce, num_samples - num_samples_computed)
         indices = [list(range(num_samples_computed, num_samples_computed + run_num_samples))]
@@ -408,7 +478,7 @@ def large_scenario_set_downlink_wmmse50(scenario, num_iter=100, num_trials=100, 
 
 def large_scenario_set_initialized_downlink_wmmse(scenario, init="mrc", num_iter=100, use_stable=True):
     """
-    Automatically splits up a scenario batch and passes it to the WMMSE algorithm due to memory constraints.
+    Automatically splits up a scenario batch and passes it to WMMSE due to memory constraints.
     """
     num_samples = scenario["channels"][0][0].size(0)  # scenario["batch_size"]
     bss_dim = scenario["bss_dim"][0].item()
@@ -474,7 +544,7 @@ def downlink_wmmse50_batchavg(scenario, num_iter=25, num_trials=100):
     return wrates_sopt, wrates_avg_layers, bss_pow_avg_layers, bss_pow_ratio_avg_layers
 
 
-def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_iteration=False):
+def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_iteration=False, show_vals=False):
     """
     WMMSE algorithm that completely avoids the eigendecomposition, but finds mu
     by calculating the power directly and performing bisection search (more reliable for #TxAnt > #RxAnt).
@@ -483,6 +553,8 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
     :param num_iter: number of iterations
     :return: v,u,w - iterable of matrices (num_iter, *, M, N), bss_pow - array (num_iter, *, K)
     """
+    debug = False
+    eval_condition_number = False
     num_layer = num_iter
 
     # Internal configs
@@ -505,6 +577,8 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
     batch_ndim = init_dl_beamformer[0].ndim - 2  # num dimension before matrix dimensions
     expand_dim = [1] * batch_ndim
 
+    rtype = scenario["bss_pow"].dtype
+
     # prepare and expand channels
     channels = []
     for i_bs in range(num_bss):
@@ -521,6 +595,9 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
         v[i_user].append(init_dl_beamformer[i_user])
 
     for i_layer in range(num_layer):
+        if debug or show_iteration:
+            print("\rIteration {}...".format(i_layer+1), end="", flush=True)
+
         # MMSE: U + W for every user
         # U * W * U^H is equal for every BS, it will be calculated concurrently as preparation for calculation of V
         uwu = []
@@ -534,11 +611,12 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
             # SUM efficiently calculated
             for i_bs in range(num_bss):
                 bs_assigned_users = scenario["bss_assign"][i_bs]
-                v_stack = torch.stack([v[lj][i_layer] for lj in bs_assigned_users], dim=0)
+                v_stack = torch.stack([v[lj][i_layer] for lj in bs_assigned_users], dim=0)  # this does not work for different sizes of V
                 bs_channel2user = channels[i_bs][i_user]
                 partial_covariance_mats = torch.matmul(bs_channel2user, v_stack)
                 partial_covariance_mats = util.cmat_square(partial_covariance_mats)
                 dl_covariance_mat = dl_covariance_mat + partial_covariance_mats.sum(dim=0)
+
 
             # U = INV * H * V
             inv_cov_mat = util.clean_hermitian(torch.linalg.inv(util.clean_hermitian(dl_covariance_mat)))  # second clean did not help
@@ -595,7 +673,16 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
                 aux_assigned_user_mat.append(aux_assigned_user_mat_temp)
             aux_assigned_user_mat = torch.stack(aux_assigned_user_mat, dim=0).sum(dim=0)
 
-            eigenval_temp, eigenvec_temp = torch.linalg.eigh(ul_cov_mat_temp)
+            use_np_eval = False
+            if use_np_eval:
+                eval, evec = np.linalg.eigh(ul_cov_mat_temp.numpy())
+                eigenval_temp, eigenvec_temp = torch.tensor(eval), torch.tensor(evec)
+            else:
+                eigenval_temp, eigenvec_temp = torch.linalg.eigh(ul_cov_mat_temp)
+
+            eigenval_temp2 = torch.clamp(eigenval_temp, min=0)
+            eigenvec_temp2 = eigenvec_temp
+
             eigenvec_temp = eigenvec_temp.unsqueeze(0).transpose(0, -1)  # .type(torch.complex64)  # the matrix dim now only hold single eigenvecs, while dim 0 now iterates over different eigenvecs, so (M, *batchdim, M, 1)
             nominator_coeff = util.mmchain(eigenvec_temp.conj().transpose(-2, -1), aux_assigned_user_mat.unsqueeze(0), eigenvec_temp).real.squeeze(-1).squeeze(-1)  # dim 0 of size M holds coefficients, so (M, *batch_size, 1)
             nominator_coeff = nominator_coeff / bss_maxpow[..., i_bs].expand(1, *batch_size)
@@ -605,7 +692,14 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
             mu_step_size = mu_root_max/4
             eye = torch.eye(bss_dim[i_bs], device=device).view(*expand_dim, bss_dim[i_bs], bss_dim[i_bs])
             for ii in range(lagrangian_max_iter):
-                inv_augmented_ul_cov_mat_temp = util.clean_hermitian(torch.linalg.inv(ul_cov_mat_temp + eye * mu_root.unsqueeze(-1).unsqueeze(-1)))
+                if USE_PSEUDOINV:
+                    eigenval_loaded = eigenval_temp2 + mu_root.unsqueeze(-1)
+                    eigenval_loaded_inv = 1 / eigenval_loaded
+                    eigenval_loaded_inv[eigenval_loaded < PSEUDOINV_SVAL_THRESH] = 0
+                    inv_augmented_ul_cov_mat_temp = util.clean_hermitian(
+                        (eigenvec_temp2 * eigenval_loaded_inv.unsqueeze(-2)) @ eigenvec_temp2.swapaxes(-2, -1).conj())
+                else:
+                    inv_augmented_ul_cov_mat_temp = util.clean_hermitian(torch.linalg.inv(ul_cov_mat_temp + eye * mu_root.unsqueeze(-1).unsqueeze(-1)))
 
                 v_running_bsmat = torch.matmul(inv_augmented_ul_cov_mat_temp, v_tilde_bsmat)
 
@@ -623,11 +717,13 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
                 col += num_cols
                 bss_current_pow[..., i_bs] += util.bf_mat_pow(v_temp)
 
-        # Power clamping in case solving QCQP still fails
+        # Power clamping in case of ill conditioned matrices
         bss_current_pow = torch.maximum(bss_maxpow, bss_current_pow)  # pre clamping, to avoid any division underflows
         # print(bss_current_pow)
         correction_factor = torch.clamp(torch.sqrt(bss_maxpow / bss_current_pow), max=1)
         # print(correction_factor)
+        if debug and torch.any(correction_factor < (1 - 1e-6)):
+            print(correction_factor)
 
         for i_user in range(num_users):
             i_bs = assigned_bs[i_user]
@@ -644,6 +740,9 @@ def downlink_wmmse_stable(scenario, init_dl_beamformer=[], num_iter=100, show_it
         bss_pow[i_bs] += util.bf_mat_pow(v[i_user])
     bss_pow = bss_pow.movedim(0, -1)  # moves bss dimension to last, first dim is over layers
 
+    if debug or show_iteration:
+        print("done!")
+
     return v, u, w, bss_pow
 
 
@@ -654,7 +753,6 @@ def downlink_wmmse_sisoadhoc(scenario, init_dl_beamformer=[], num_iter=100, show
     :param init_dl_beamformer: iterable of matrices (*, 1, 1), initial guess for the downlink beamformer
     :param num_iter: number of iterations
     :return: v,u,w - iterable of matrices (num_iter, *, 1, 1), bss_pow - array (num_iter, *, K)
-    :return:
     """
     def scenario_extraction(scenario):
         num_users = scenario["num_users"]
@@ -697,7 +795,7 @@ def downlink_wmmse_sisoadhoc(scenario, init_dl_beamformer=[], num_iter=100, show
         ul_cov = torch.square(u) * w
         ul_cov = torch.matmul(torch.square(cmat).transpose(-2, -1), ul_cov).sum(dim=-1, keepdim=True)
 
-        # SISO Adhoc QCQP
+        # SISO Adhoc Lagrangian
         mu = v_tilde / torch.sqrt(tx_pow).unsqueeze(-1) - ul_cov
         mu = torch.clamp(mu, min=0)
 

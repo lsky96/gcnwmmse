@@ -4,19 +4,22 @@ import torch
 import comm.mathutil as util
 import numpy as np
 from scipy.io import loadmat
+import pickle
 
 
 def mimoifc_randcn(bss_dim, users_dim, assignment, batch_size=[], snr=0, weights=1, interference_ratio=1, channel_gain=1, user_noise_pow=1,
-                   device=torch.device("cpu")):
+                   device=torch.device("cpu"), precision="double"):
     """
     Generates batches of random channel vectors of a MIMO IFC and returns dict per convention.
-    :param bss_dim: iterable, contains antenna numbers of K BSs (equal for all batches)
-    :param users_dim: iterable of iterables, which contain antenna numbers of users (equal for all batches)
+    :param bss_dim: iterable, contains array sizes of K BSs (equal for all batches)
+    :param users_dim: iterable of iterables, which contain array sizes of users (equal for all batches)
     :param assignment: iterable of size len(rx) containing indices assigning each user to a BS (equal for all batches)
+    :param snr: iterable or scalar of snr in dB per base station, results in return max powers of 10^(SNR/10), see WMMSE paper, broadcastable to (batch_size, num_bss)
     :param snr: iterable or scalar of snr in dB per base station, results in return max powers of 10^(SNR/10), see WMMSE paper, broadcastable to (batch_size, num_bss)
     :param weights: iterable of weights for rates per user or scalar, technically not a channel property, broadcastable to (batch_size, num_users)
     :param interference_ratio: average linear channel gain ratio between direct and interference channels (broadcastable to (batch_size))
     :param device: device to assign tensors to
+    :param precision: double or single for float point values
 
     :return: dictionary, containing
         channels: iterable of K iterables, each containing all channel matrix tensors from the corresponding BS to each user
@@ -33,7 +36,10 @@ def mimoifc_randcn(bss_dim, users_dim, assignment, batch_size=[], snr=0, weights
         device: device on which tensors are stored
     """
 
-    dtype = torch.double
+    if precision == "double":
+        dtype = torch.double
+    else:
+        dtype = torch.single
 
     num_bss = len(bss_dim)
     num_users = len(users_dim)
@@ -89,20 +95,29 @@ def mimoifc_randcn(bss_dim, users_dim, assignment, batch_size=[], snr=0, weights
     return scenario
 
 
-def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance=500, bss_pow=40, noise_pow=-120, weights=1, cell_model="pico", csi_noise=None,
-                   device=torch.device("cpu")):
+def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance=500, bss_pow=40, noise_pow=-120,
+                     weights=1, cell_model="pico", csi_noise=None, rank_one_channels=False,
+                   device=torch.device("cpu"), precision="double"):
     """
-    Generates batches of random channel vectors of a MIMO IFC and returns dict per convention. Scenario consists of 3BSs
-    arranged in a equilateral triangle, users placed in the sextant closest to their assigned BSs.
-    :param bss_dim: iterable, contains antenna numbers of 3 BSs (equal for all batches)
-    :param users_dim: iterable of iterables, which contain antenna numbers of users (equal for all batches)
+    Generates batches of random channel vectors of a MIMO IFC and returns dict per convention.
+    :param bss_dim: iterable, contains array sizes of K BSs (equal for all batches) OR
+        dictionary containing keys "all_rand_interval" containing a tuple with minimum and maximum antenna dimension,
+        equal for all BSs, and "num_bss" containing a positive number of BSs.
+    :param users_dim: iterable of iterables, which contain array sizes of users (equal for all batches) OR
+        dictionary containing keys "all_rand_interval" containing a tuple with minimum and maximum antenna dimension,
+        equal for all UEs, and "num_users" containing a positive number of UEs or a list defining an interval for random
+        numbers of UEs (assignment is automatic and equal).
     :param assignment: iterable of size len(rx) containing indices assigning each user to a BS (equal for all batches)
-    :param batch_size:
-    :param bs_distance: distance of BSs from each other in
-    :param bss_pow: combined power budget of BSs, broadcastable to (batch_size, num_bss)
-    :param noise_pow: noise power at each antenna of UE, broadcastable to (batch_size, num_users)
+    :param batch_size: iterable of ints
+    :param bs_distance: distance of BSs from each other in OR
+        dictionary containing key "batchsamples_rand_interval" containing a tuple with minimum and maximum BS distance.
+    :param bss_pow: combined power budget of BSs, broadcastable to (batch_size, num_bss) OR
+        dictionary containing key "batchsamples_rand_interval" containing a tuple with minimum and maximum BS power.
+    :param noise_pow: noise power at each antenna of UE, broadcastable to (batch_size, num_users) OR
+        dictionary containing key "batchsamples_rand_interval" containing a tuple with minimum and maximum noise power.
     :param weights: iterable of weights for rates per user or scalar, technically not a channel property, broadcastable to (batch_size, num_users)
     :param device: device to assign tensors to
+    :param precision: double or single for float point values
 
     :return: dictionary, containing
         channels: iterable of K iterables, each containing all channel matrix tensors from the corresponding BS to each user
@@ -119,31 +134,73 @@ def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance
         device: device on which tensors are stored
     """
 
-    dtype = torch.double
+    if precision == "double":
+        dtype = torch.double
+    else:
+        dtype = torch.single
 
-    num_bss = len(bss_dim)
-    num_users = len(users_dim)
+    # Antenna dims
+    if isinstance(bss_dim, dict):
+        if "all_rand_interval" in bss_dim.keys():
+            num_bss = bss_dim["num_bss"]
+            bss_dim = [random.randrange(bss_dim["all_rand_interval"][0], bss_dim["all_rand_interval"][1]+1)] * num_bss
+        else:
+            raise KeyError
+    else:
+        num_bss = len(bss_dim)
+    # print(bss_dim)
+
+    if isinstance(users_dim, dict):
+        if "all_rand_interval" in users_dim.keys():
+            if isinstance(users_dim["num_users"], tuple) or isinstance(users_dim["num_users"], list):
+                assert len(users_dim["num_users"]) == 2
+                num_users = random.randrange(users_dim["num_users"][0], users_dim["num_users"][1]+1)
+                # generate random assignment, users will be as equally distributed as possible
+                bsid = 0
+                assignment = []
+                for _ in range(num_users):
+                    assignment.append(bsid)
+                    bsid = (bsid+1) % num_bss
+            else:
+                num_users = users_dim["num_users"]
+            users_dim = [random.randrange(users_dim["all_rand_interval"][0], users_dim["all_rand_interval"][1]+1)] * num_users
+        else:
+            raise KeyError
+    else:
+        num_users = len(users_dim)
+    # print(users_dim)
+
     factory_kwargs = {"dtype": dtype, "device": device}
+    assert (len(assignment) == len(users_dim))
 
     def get_scene(bs_d):
         def polar_to_cartesian(radius, angle):
-            x = radius * np.cos(angle)
-            y = radius * np.sin(angle)
+            x = radius * torch.cos(angle)
+            y = radius * torch.sin(angle)
             xy = torch.tensor(np.stack([x, y], axis=-1), **factory_kwargs)
             return xy
 
-        tx_pos = [[0, 0]]
+        # tx_pos = [[0, 0]]
+        # if num_bss >= 2:
+        #     tx_pos.append([bs_d, 0])
+        # if num_bss >= 3:
+        #     tx_pos.append([bs_d/2, sqrt(3) * bs_d / 2])
+        # tx_pos = torch.tensor(tx_pos, **factory_kwargs)
+
+        tx_pos = torch.stack([torch.zeros_like(bs_d), torch.zeros_like(bs_d)], dim=-1).unsqueeze(-2)
         if num_bss >= 2:
-            tx_pos.append([bs_d, 0])
+            temp = torch.stack([bs_d, torch.zeros_like(bs_d)], dim=-1).unsqueeze(-2)
+            tx_pos = torch.cat([tx_pos, temp], dim=-2)
         if num_bss >= 3:
-            tx_pos.append([bs_d/2, sqrt(3) * bs_d / 2])
+            temp = torch.stack([bs_d / 2, sqrt(3) * bs_d / 2], dim=-1).unsqueeze(-2)
+            tx_pos = torch.cat([tx_pos, temp], dim=-2)
         tx_pos = torch.tensor(tx_pos, **factory_kwargs)
 
         rx_pos = torch.zeros(*batch_size, num_users, 2)
         for i_user in range(num_users):
             R = bs_d / sqrt(3)
-            rx_pos_rtemp = R * np.sqrt(np.random.rand(*batch_size) * (1 - 100/(R**2)) + 100/(R**2))  # no closer than 10 m
-            rx_pos_phitemp = pi / 3 * np.random.rand(*batch_size)
+            rx_pos_rtemp = R * torch.sqrt(torch.rand(*batch_size, **factory_kwargs) * (1 - 100/(R**2)) + 100/(R**2))  # no closer than 10 m
+            rx_pos_phitemp = pi / 3 * torch.rand(*batch_size, **factory_kwargs)
 
             i_bs = assignment[i_user]
             if i_bs == 0:
@@ -154,7 +211,7 @@ def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance
                 xyoff = polar_to_cartesian(rx_pos_rtemp, rx_pos_phitemp + (4 * pi / 3))
             else:
                 raise ValueError
-            rx_pos[..., i_user, :] = tx_pos[i_bs] + xyoff
+            rx_pos[..., i_user, :] = tx_pos[..., i_bs, :] + xyoff
 
         return tx_pos, rx_pos
 
@@ -171,26 +228,60 @@ def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance
                     raise ValueError("Unknown cell model.")
         return pathloss_mat
 
-
-    num_bss = len(bss_dim)
-    num_users = len(users_dim)
-    assert (len(assignment) == len(users_dim))
+    """
+    def sample_fast_fading(large_scale_fading_chan, batch_sz, rscale=1):
+        # num_pairs = large_scale_fading_chan.size()[-1]
+        fast_fading = np.random.rayleigh(rscale, size=[*batch_sz, num_pairs, num_pairs])
+        sampled_channel = large_scale_fading_chan * fast_fading
+        return sampled_channel
+    """
 
     # SNR
-    bss_pow = torch.pow(torch.tensor(10, **factory_kwargs),
-                        torch.tensor(bss_pow, **factory_kwargs) / 10)
-    bss_pow = bss_pow.expand(*batch_size, num_bss)
+    if isinstance(bss_pow, dict):
+        if "batchsamples_rand_interval" in bss_pow.keys():
+            bss_pow = torch.rand(*batch_size, 1, **factory_kwargs)\
+                      * (bss_pow["batchsamples_rand_interval"][1] - bss_pow["batchsamples_rand_interval"][0]) \
+                      + bss_pow["batchsamples_rand_interval"][0]
+            bss_pow = torch.pow(torch.tensor(10, **factory_kwargs),bss_pow / 10)
+            bss_pow = bss_pow.expand(*batch_size, num_bss)
+        else:
+            raise KeyError
+    else:
+        bss_pow = torch.pow(torch.tensor(10, **factory_kwargs),
+                            torch.tensor(bss_pow, **factory_kwargs) / 10)
+        bss_pow = bss_pow.expand(*batch_size, num_bss)
 
     # Rate weights
     rweights = torch.tensor(weights, **factory_kwargs)
     rweights = rweights.expand([*batch_size, num_users])
 
     # Noise
-    users_noise_pow = torch.pow(torch.tensor(10, **factory_kwargs),
-                        torch.tensor(noise_pow, **factory_kwargs) / 10)
-    users_noise_pow = users_noise_pow.expand(*batch_size, num_users)
+    if isinstance(noise_pow, dict):
+        if "batchsamples_rand_interval" in noise_pow.keys():
+            noise_pow = torch.rand(*batch_size, 1, **factory_kwargs) \
+                        * (noise_pow["batchsamples_rand_interval"][1] - noise_pow["batchsamples_rand_interval"][0])\
+                        + noise_pow["batchsamples_rand_interval"][0]
+            users_noise_pow = torch.pow(torch.tensor(10, **factory_kwargs),
+                                        noise_pow / 10)
+            users_noise_pow = users_noise_pow.expand(*batch_size, num_users)
+        else:
+            raise KeyError
+    else:
+        users_noise_pow = torch.pow(torch.tensor(10, **factory_kwargs),
+                            torch.tensor(noise_pow, **factory_kwargs) / 10)
+        users_noise_pow = users_noise_pow.expand(*batch_size, num_users)
 
     # Generate scene
+    if isinstance(bss_distance, dict):
+        if "batchsamples_rand_interval" in bss_distance.keys():
+            bss_distance = torch.rand(*batch_size, **factory_kwargs) \
+                           * (bss_distance["batchsamples_rand_interval"][1] - bss_distance["batchsamples_rand_interval"][0])\
+                           + bss_distance["batchsamples_rand_interval"][0]
+        else:
+            raise KeyError
+    else:
+        bss_distance = torch.tensor(bss_distance, **factory_kwargs)
+
     tx_position, rx_position = get_scene(bss_distance)
     pathloss = get_pathloss(tx_position, rx_position)
     # print(pathloss[0])
@@ -202,9 +293,15 @@ def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance
         assigned_users = users_assign == i_bs
         channels.append([])
         for i_user in range(num_users):
-            channels[i_bs].append(
-                (10**(-pathloss[..., i_user, i_bs] / 20)).unsqueeze(-1).unsqueeze(-1)
-                * util.randcn(*batch_size, users_dim[i_user], bss_dim[i_bs], **factory_kwargs))  # Rayleigh fading
+            if not rank_one_channels:
+                channels[i_bs].append(
+                    (10**(-pathloss[..., i_user, i_bs] / 20)).unsqueeze(-1).unsqueeze(-1)
+                    * util.randcn(*batch_size, users_dim[i_user], bss_dim[i_bs], **factory_kwargs))  # Rayleigh fading
+            else:
+                channels[i_bs].append(
+                    (10 ** (-pathloss[..., i_user, i_bs] / 20)).unsqueeze(-1).unsqueeze(-1)
+                    * util.randcn(*batch_size, users_dim[i_user], 1, **factory_kwargs)
+                    * util.randcn(*batch_size, 1, bss_dim[i_bs], **factory_kwargs))  # Rayleigh fading
         bss_assign.append((assigned_users * torch.arange(num_users, device=device))[
                               assigned_users])  # gives the indices of the users assigned to the BS
 
@@ -215,6 +312,7 @@ def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance
         "channels": channels,
         "tx_pos": tx_position,
         "rx_pos": rx_position,
+        "bss_distance": bss_distance,
         "pathloss": pathloss,  # in dB, (*batch_size, num_users, num_bss)
         "bss_assign": bss_assign,
         "users_assign": users_assign,
@@ -236,7 +334,8 @@ def mimoifc_triangle(bss_dim, users_dim, assignment, batch_size=[], bss_distance
 
 
 def siso_adhoc_2dscene(num_pairs, noise_pow=-92, pathloss_coefficient=2.2, density=1, weights=1, batch_size=[],
-                       device=torch.device("cpu"), fixed_scene=False,):
+                       device=torch.device("cpu"), fixed_scene=False,
+                       precision="double"):
     """
     Generates wireless scenes according to "Eisen and Ribeiro - 2020 -
         Optimal Wireless Resource Allocation With Random Edge Graph Neural Networks".
@@ -248,6 +347,7 @@ def siso_adhoc_2dscene(num_pairs, noise_pow=-92, pathloss_coefficient=2.2, densi
         randomly drawn density between density[0] and density[1].
     :param batch_size: Size of batch realization.
     :param device: Compute device.
+    :param precision: "single" or "double".
     :return: dictionary, containing
         channels: iterable of K iterables, each containing all channel matrix tensors from the corresponding BS to each user
         bss_assign: iterable of K tensors containing the indices of the assigned users
@@ -276,13 +376,18 @@ def siso_adhoc_2dscene(num_pairs, noise_pow=-92, pathloss_coefficient=2.2, densi
 
     def sample_fast_fading(large_scale_fading_chan, sigma=1):
         # num_pairs = large_scale_fading_chan.size()[-1]
+        # fast_fading = np.random.rayleigh(rscale, size=[*batch_size, num_pairs, num_pairs])
         # fast_fading = torch.tensor(fast_fading, dtype=ctype, device=device)
         fast_fading = sigma * util.randcn(*batch_size, num_pairs, num_pairs, dtype=dtype, device=device) * (2**(1/2))  # in order to make sigma consistent in sense of Rayleigh(sig)
         sampled_channel = large_scale_fading_chan * fast_fading
         return sampled_channel
 
-    dtype = torch.double
-    ctype = torch.complex128
+    if precision == "double":
+        dtype = torch.double
+        ctype = torch.complex128
+    else:
+        dtype = torch.single
+        ctype = torch.complex64
 
     factory_kwargs = {"dtype": dtype, "device": device}
 
@@ -400,6 +505,38 @@ def siso_adhoc_2dscene(num_pairs, noise_pow=-92, pathloss_coefficient=2.2, densi
     }
     # print(channels[0][0].size())
     return scenario
+
+
+def scenario_to_double(scenario):
+    """ Returns scenario with all values being double or complex double."""
+    new_scenario = {}
+
+    def convert(item):
+        if torch.is_tensor(item):
+            if torch.is_complex(item):
+                new_item = item.type(torch.complex128)
+            else:
+                if torch.is_floating_point(item):
+                    new_item = item.type(torch.float64)
+                else:
+                    new_item = item
+        else:
+            new_item = item
+        return new_item
+
+    def nested_list_convert(item):
+        if isinstance(item, list):
+            new_item = []
+            for nested_item in item:
+                new_item.append(nested_list_convert(nested_item))
+            return new_item
+        else:
+            return convert(item)
+
+    for k, v in scenario.items():
+        new_scenario[k] = nested_list_convert(v)
+
+    return new_scenario
 
 
 def scenario_select_index(scenario, ind):
@@ -574,7 +711,7 @@ def downlink_sum_rate(scenario, dl_beamformer):
 
 def downlink_rate_iaidnn(scenario, dl_beamformer):
     """
-    Computes the IAIDNN objective (normalizes the power of the beamformers after the fact).
+    Computes the IAIDNN objective (normalizes the power of beamformers).
     :param scenario: mimo_8Tx ifc scenario, or batched scenario of same batch_isze as dl_beamformer
     :param dl_beamformer: iterable of (*, M, D) tensors, where the matrix dim DxM can differ from tensor to tensor, but the batch dim * cannot.
     :return: rate, weighted rate
@@ -656,7 +793,8 @@ def downlink_sum_rate_iaidnn(scenario, dl_beamformer):
 
 def deepmimo(channel_path=None, bss_pow=30, noise_pow=-90, weights=1, precision="double", device=torch.device("cpu")):
     """
-    Generates a scenario batch using the DeepMIMO scenario batch in the Matlab .mat file under channel_path.
+    Generates a scenario batch using the DeepMIMO scenario batch in the .pkl file under channel_path generated by the
+    deepmimo script.
     :return: dictionary, containing
         channels: iterable of K iterables, each containing all channel matrix tensors from the corresponding BS to each user
         bss_assign: iterable of K tensors containing the indices of the assigned users
@@ -679,13 +817,13 @@ def deepmimo(channel_path=None, bss_pow=30, noise_pow=-90, weights=1, precision=
     factory_kwargs = {"dtype": dtype, "device": device}
 
     # Data extraction
-    matfile = loadmat(channel_path)
-    channel_mats = matfile["channels"]
-    num_bss = channel_mats.shape[1]
-    txdim = channel_mats[0, 0][0, 0].shape[2]
-    num_users = channel_mats[0, 0].shape[1]
-    rxdim = channel_mats[0, 0][0, 0].shape[1]
-    batch_size = [channel_mats[0, 0][0, 0].shape[0]]
+    with open(channel_path, mode="rb") as fh:
+        channel_mats = pickle.load(fh)
+    num_bss = len(channel_mats)
+    txdim = channel_mats[0][0].shape[2]
+    num_users = len(channel_mats[0])
+    rxdim = channel_mats[0][0].shape[1]
+    batch_size = [channel_mats[0][0].shape[0]]
     # print(num_bss, num_users, batch_size)
 
     bss_dim = [*[txdim]*num_bss]
@@ -720,7 +858,7 @@ def deepmimo(channel_path=None, bss_pow=30, noise_pow=-90, weights=1, precision=
         assigned_users = users_assign == i_bs
         channels.append([])
         for i_user in range(num_users):
-            channels[i_bs].append(torch.tensor(channel_mats[0, i_bs][0, i_user]))
+            channels[i_bs].append(torch.tensor(channel_mats[i_bs][i_user]))
         bss_assign.append((assigned_users * torch.arange(num_users, device=device))[
                               assigned_users])  # gives the indices of the users assigned to the BS
 

@@ -82,7 +82,7 @@ def wrate_loss_samplenorm(scenario, dl_beamformers, layers="all"):
 
     mean_loss = torch.mean(loss.detach())  # in order to see training progress, negative
     """ADDED FOR TESTING"""
-    loss = loss / torch.clamp(loss.detach(), max=-1e-6)
+    loss = loss / torch.clamp(loss.detach(), max=-1e-6)  # note that loss is negative
     # loss = loss / loss.detach()  # sample normalization, positive
     """"""
     loss = loss.sum() * mean_loss  # see training progress, negative
@@ -93,7 +93,7 @@ def wrate_loss_samplenorm(scenario, dl_beamformers, layers="all"):
     return loss
 
 
-def iadnn_loss(scenario, dl_beamformers, layers="all"):
+def iaidnn_loss(scenario, dl_beamformers, layers="all"):
     """
     Creates a normalized loss for weighted downlink rates given downlink beamformers applied in a scenario.
     :param scenario:

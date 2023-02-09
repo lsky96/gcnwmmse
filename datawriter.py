@@ -1,3 +1,9 @@
+"""
+Author: 
+Lukas Schynol
+lukasschy96@gmail.com
+"""
+
 import os
 import time
 import torch
@@ -7,7 +13,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 class SummaryWriterWrapper:
-    """Class wraps Tensorboard Summarywriter such that data can be later easily exported to CSV-Files."""
     def __init__(self, summary_dir):
         self.summary_dir = summary_dir
         self.data_path = os.path.join(summary_dir, "resultdata")
@@ -34,13 +39,15 @@ class SummaryWriterWrapper:
         scalar_value = self._to_numpy(scalar_value)
         if not(walltime):
             walltime = time.time()
+        ordered_dict = {"walltime": walltime, "step": globalstep, main_tag: scalar_value}
         if main_tag in self.data:
-            row = pd.DataFrame(np.array([[walltime, globalstep, scalar_value]]),
-                               columns=["walltime", "step", main_tag])
-            self.data[main_tag] = self.data[main_tag].append(row)
+            # print(main_tag, scalar_value)
+            row = pd.DataFrame(data=ordered_dict, index=[0])
+            # self.data[main_tag] = self.data[main_tag].append(row)
+            self.data[main_tag] = pd.concat([self.data[main_tag], row])
         else:
-            self.data[main_tag] = pd.DataFrame(np.array([[walltime, globalstep, scalar_value]]),
-                                               columns=["walltime", "step", main_tag])
+            # print(main_tag, scalar_value)
+            self.data[main_tag] = pd.DataFrame(data=ordered_dict, index=[0])
 
     def save_scalars(self, main_tag, tag_scalar_dict, globalstep, walltime=None):
         tag_scalar_dict = self._to_numpy(tag_scalar_dict)
@@ -51,7 +58,8 @@ class SummaryWriterWrapper:
             ordered_dict[k] = v
         if main_tag in self.data:
             row = pd.DataFrame(data=ordered_dict, index=[0])
-            self.data[main_tag] = self.data[main_tag].append(row)
+            # self.data[main_tag] = self.data[main_tag].append(row)
+            self.data[main_tag] = pd.concat([self.data[main_tag], row])
         else:
             self.data[main_tag] = pd.DataFrame(data=ordered_dict, index=[0])
 
@@ -83,6 +91,19 @@ class SummaryWriterWrapper:
     def flush(self):
         self.tensorboard_writer.flush()
         torch.save(self.data, self.data_path)
+
+    def get_scalar_data(self, tag):
+        if tag in self.data:
+            tag_data = self.data[tag]
+            if isinstance(tag_data, dict):  # for figures
+                raise ValueError("Tag not found in data.")
+            else:
+                converted_data = {}
+                for coln in tag_data.keys():
+                    converted_data[coln] = tag_data[coln].to_numpy()
+                return converted_data
+        else:
+            raise ValueError("Tag not found in data.")
 
     def export_data(self, tag=None):
         export_dir = os.path.join(self.summary_dir, "export")
@@ -116,7 +137,6 @@ class SummaryWriterWrapper:
 
 
 class DataExporter:
-    """Collects data similar to Tensorboard Summarywriter to dump it to CSV-files."""
     def __init__(self, export_dir):
         self.export_dir = export_dir
         self.data = dict()
@@ -128,7 +148,8 @@ class DataExporter:
         if main_tag in self.data:
             row = pd.DataFrame(np.array([[walltime, globalstep, scalar_value]]),
                                columns=["walltime", "step", main_tag])
-            self.data[main_tag] = self.data[main_tag].append(row)
+            # self.data[main_tag] = self.data[main_tag].append(row)
+            self.data[main_tag] = pd.concat([self.data[main_tag], row])
         else:
             self.data[main_tag] = pd.DataFrame(np.array([[walltime, globalstep, scalar_value]]),
                                                columns=["walltime", "step", main_tag])
@@ -142,7 +163,8 @@ class DataExporter:
             ordered_dict[k] = v
         if main_tag in self.data:
             row = pd.DataFrame(data=ordered_dict, index=[0])
-            self.data[main_tag] = self.data[main_tag].append(row)
+            # self.data[main_tag] = self.data[main_tag].append(row)
+            self.data[main_tag] = pd.concat([self.data[main_tag], row])
         else:
             self.data[main_tag] = pd.DataFrame(data=ordered_dict, index=[0])
 

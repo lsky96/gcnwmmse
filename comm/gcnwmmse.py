@@ -12,6 +12,8 @@ from typing import Optional
 
 MIN_LAGRANGIAN = 0
 REMOVE_BAD_SAMPLES = True
+USE_PSEUDOINV = True
+PSEUDOINV_SVAL_THRESH = 1e-12
 
 
 class GCNWMMSE(nn.Module):
@@ -92,10 +94,12 @@ class GCNWMMSE(nn.Module):
         for w_user in list(map(list, zip(*w_layers))):  # transposes layer and user dim
             w_out.append(torch.stack(w_user, dim=0))
 
+        """ADDED FOR TESTING"""
         if self.training:  # to remove scenarios with numerical problems in training
             no_error = ~error_occured.unsqueeze(-1).unsqueeze(-1)
             for i_user in range(len(v_out)):
                 v_out[i_user] = v_out[i_user] * no_error
+        """"""
 
         # power
         num_users = scenario["num_users"]
@@ -195,6 +199,7 @@ class GCNWMMSELayer(nn.Module):
         debug = False
         # Internal configs
         # lagrangian_max_iter = self.lagrangian_max_iter
+        min_norm = 1e-12
 
         device = scenario["device"]
         num_users = scenario["num_users"]
@@ -269,8 +274,8 @@ class GCNWMMSELayer(nn.Module):
             w_temp = util.clean_hermitian(torch.linalg.inv(w_inverse))
             # print("wtemp", w_temp[0])
             if self.w_poly is not None:
-                    w_filtered = util.matpoly_simple_norm(w_temp, torch.abs(self.filter_param["w_param_poly"]),
-                                                            self.w_poly["norm_above"])
+                w_filtered = util.matpoly_simple_norm(w_temp, torch.abs(self.filter_param["w_param_poly"]),
+                                                      self.w_poly["norm_above"])
             else:
                 w_filtered = w_temp
 
@@ -288,6 +293,7 @@ class GCNWMMSELayer(nn.Module):
 
         "CALCULATION OF V"
         augmented_ul_cov_mats = []  # size num_bs list of covariance matrices
+        inv_augmented_ul_cov_mats = []
         inv2_augmented_ul_cov_mats = []
         inv_augmented_ul_cov_mats = []
 
@@ -319,6 +325,10 @@ class GCNWMMSELayer(nn.Module):
             # Decomposition of SUM for Lagrangian
             eigenval_temp, eigenvec_temp = torch.linalg.eigh(ul_cov_mat_temp)
             eigenval_temp = torch.clamp(eigenval_temp, min=0)
+
+            eigenval_temp2 = eigenval_temp
+            eigenvec_temp2 = eigenvec_temp
+
             eigenval_temp = eigenval_temp.movedim(-1, 0)  # now dim 0 contains M eigenval, so (M, *batch_size)
             eigenvec_temp = eigenvec_temp.unsqueeze(0).transpose(0,
                                                                  -1)  # the matrix dim now only hold single eigenvecs, while dim 0 now iterates over different eigenvecs, so (M, *batchdim, M, 1)
@@ -331,36 +341,53 @@ class GCNWMMSELayer(nn.Module):
 
             # Rational function rooting (per basestation due to different Tx dim)
             mu_root = util.rationalfct_solve_0d2(nominator_coeff, eigenval_temp, num_iter=self.lagrangian_max_iter)
+
+            """ADDED FOR TESTING PURPOSES"""
             mu_root = torch.clamp(mu_root, min=MIN_LAGRANGIAN)
+            """"""
 
             # Compute inverse mat
             eye = torch.eye(bss_dim[i_bs], device=device).view(*expand_dim, bss_dim[i_bs], bss_dim[i_bs])
             augmented_ul_cov_mat_temp = ul_cov_mat_temp + eye * mu_root.unsqueeze(-1).unsqueeze(-1)
-            if torch.any(torch.isnan(mu_root)) or debug:
+            if torch.any(torch.isnan(mu_root)) and debug:
                 print("mu_root", mu_root)
                 exit()
 
             augmented_ul_cov_mats.append(augmented_ul_cov_mat_temp)
-            inv_augmented_ul_cov_mats.append(
-                util.clean_hermitian(torch.linalg.inv(augmented_ul_cov_mat_temp)))
+            if USE_PSEUDOINV:
+                eigenval_loaded = eigenval_temp2 + mu_root.unsqueeze(-1)
+                eigenval_loaded[eigenval_loaded < PSEUDOINV_SVAL_THRESH] = 1e12  # effectively setting the inverse to 0
+                eigenval_loaded_inv = 1 / eigenval_loaded
+                # print(eigenval_loaded.shape, mu_root.shape, eigenvec_temp.shape)
+                inv_temp = util.clean_hermitian((eigenvec_temp2 * eigenval_loaded_inv.unsqueeze(-2)) @ eigenvec_temp2.swapaxes(-2, -1).conj())
+                if debug and torch.any(torch.isnan(inv_temp)):
+                    print("Rinv is NaN")
+                inv_augmented_ul_cov_mats.append(inv_temp)
+            else:
+                inv_augmented_ul_cov_mats.append(util.clean_hermitian(torch.linalg.inv(augmented_ul_cov_mat_temp)))
             if "ar2" in self.v_active_components.keys() and self.v_active_components["ar2"]:
                 mat_temp = inv_augmented_ul_cov_mats[i_bs]
                 inv2_augmented_ul_cov_mats.append(torch.matmul(mat_temp, mat_temp))
+            # mu.append(mu_root)  # indexing return tensor
 
         # Running_Stats
         diagl_scale_batch = []
         bias_scale_batch = []
 
         # Calculation of V
+        """ADDED FOR TESTING"""
         v_out_vanilla = []
+        """"""
         v_bypass_out = []
         # bss_current_pow = torch.zeros(*batch_size, num_bss, device=device)
         for i_user in range(num_users):
             i_bs = assigned_bs[i_user]
             v_tilde_temp = v_tilde[i_user].unsqueeze(0).transpose(0, -1)  # columns into batch
 
+            """ADDED FOR TESTING"""
             if self.training:
                 v_out_vanilla.append(inv_augmented_ul_cov_mats[i_bs] @ v_tilde[i_user])
+            """"""
 
             v_temp = 0
             # ARMA
@@ -377,7 +404,6 @@ class GCNWMMSELayer(nn.Module):
             if self.v_active_components["ma"]:
                 v_temp = v_temp + util.mmchain(augmented_ul_cov_mats[i_bs], v_tilde_temp,
                                                self.filter_param["v_param_ma"])
-
             # Diagload
             if self.v_active_components["diagload"]:
                 if self.diaglnorm == "trace":
@@ -404,7 +430,7 @@ class GCNWMMSELayer(nn.Module):
                     else:  # old one
                         bias_scale = torch.sqrt(bss_maxpow[..., i_bs].unsqueeze(-1).unsqueeze(-1) / len(
                                 scenario["bss_assign"][i_bs]))  # bss_pow/num_users
-                    # print(num_streams_assigned)
+                    """print(num_streams_assigned)"""
                     bias_scale_batch.append(bias_scale.detach())
                     bias_scale_term = (1 - self.running_mean_alpha ** self.running_mean_num_tracked_batches) \
                                       * bias_scale / self.running_mean_bias_scale  # scale term biascorrected
@@ -457,7 +483,7 @@ class GCNWMMSELayer(nn.Module):
             bss_current_pow.append(pow)
         bss_current_pow = torch.stack(bss_current_pow, dim=-1)
 
-        # Detects bad scenarios where solution of QCQP completely fails
+        """ADDED FOR TESTING"""
         if self.training and REMOVE_BAD_SAMPLES:
             bss_current_pow_vanilla = []
             for i_bs in range(num_bss):
@@ -469,6 +495,7 @@ class GCNWMMSELayer(nn.Module):
             error_occured = torch.any(bss_current_pow_vanilla > bss_maxpow * 1.1, dim=-1)
         else:
             error_occured = torch.tensor(False)
+        """"""
 
         # scale track
         if self.training:
@@ -671,7 +698,7 @@ class GCNWMMSELayer_SISOAdhoc(nn.Module):
                 util.randcn(v_num_channels, v_num_channels, device=device, dtype=dtype) / torch.sqrt(
                     torch.tensor(2 * v_num_channels, device=device)))  # sqrt(#in + #out)
 
-        # buffer for biasnorm
+        # buffer for diaglnorm and biasnorm
         if self.biasnorm or self.diaglnorm:
             self.running_mean_alpha = 0.99
             self.running_mean_bias_scale: Optional[Tensor]
@@ -693,7 +720,7 @@ class GCNWMMSELayer_SISOAdhoc(nn.Module):
         def w_step(channel_mat, v, u):
             error = 1 - u.conj() * torch.diagonal(channel_mat, dim1=-2, dim2=-1).unsqueeze(-1) * v
             w_temp = 1 / error
-            w_temp = w_temp.unsqueeze(-1)  # into matrix form
+            w_temp = w_temp.unsqueeze(-1)  # get into matrix formm
 
             if self.w_poly:
                 w_filtered = util.matpoly_simple_norm(w_temp, torch.abs(self.filter_param["w_param_matrix"]),
@@ -754,7 +781,7 @@ class GCNWMMSELayer_SISOAdhoc(nn.Module):
                 else:
                     v_temp = util.complex_relu(v_temp)
 
-                if self.v_bypass_param["position"] == "after_nonlin":
+                if self.v_bypass_param and self.v_bypass_param["position"] == "after_nonlin":
                     v_byp_out = v_temp
 
                 v_temp = torch.matmul(v_temp, self.filter_param["v_param_recomb"])
@@ -767,6 +794,7 @@ class GCNWMMSELayer_SISOAdhoc(nn.Module):
 
         device = channel_mat.device
         ctype = channel_mat.dtype
+        rtype = bss_maxpow.dtype
 
         if not self.v_active_components["nonlin"]:
             recomb = torch.ones(self.v_num_channels, 1, device=device, dtype=ctype) / torch.sqrt(

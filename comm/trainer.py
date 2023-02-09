@@ -280,7 +280,7 @@ class GeneralTrainer(Trainer):
                 self.testdata_path = testdata_path
             else:
                 pass
-                # self.testdatapath is default (see superclass)
+                # self.testdatapath defaults to one of superclass
 
         self.testdata_dict = None
         self.testdata_mrc = testdata_mrc
@@ -708,18 +708,21 @@ class GeneralTrainer(Trainer):
         }
         if "avg_layers" in system_results:
             rate_plots_lastlayer["WMMSE 100 Trials Avg."] = system_results["avg_layers"][-1].mean()
-            rate_plots_lastlayer["WMMSE 100 Trials Avg. Truncated"] = system_results["avg_layers"][self.model_hyperparam["num_layers"]].mean()
+            rate_plots_lastlayer["WMMSE 100 Trials Avg. Truncated"] = system_results["avg_layers"][
+                self.model_hyperparam["num_layers"]].mean()
 
         if "opt_layers" in system_results:
             rate_plots_lastlayer["WMMSE 100 Trials Best"] = system_results["opt_layers"][-1].mean()
 
         if "mrc_layers" in system_results and self.testdata_mrc:
             rate_plots_lastlayer["WMMSE MRC Init Avg."] = system_results["mrc_layers"][-1].mean()
-            rate_plots_lastlayer["WMMSE MRC Init Avg. Truncated"] = system_results["mrc_layers"][self.model_hyperparam["num_layers"]].mean()
+            rate_plots_lastlayer["WMMSE MRC Init Avg. Truncated"] = system_results["mrc_layers"][
+                self.model_hyperparam["num_layers"]].mean()
 
         if "zf_layers" in system_results and self.testdata_zf:
             rate_plots_lastlayer["WMMSE ZF Init Avg."] = system_results["zf_layers"][-1].mean()
-            rate_plots_lastlayer["WMMSE ZF Init Avg. Truncated"] = system_results["zf_layers"][self.model_hyperparam["num_layers"]].mean()
+            rate_plots_lastlayer["WMMSE ZF Init Avg. Truncated"] = system_results["zf_layers"][
+                self.model_hyperparam["num_layers"]].mean()
 
         exporter.save_scalars("Test Set Avg. Rates", rate_plots_lastlayer, self.i_step)
 
@@ -728,13 +731,16 @@ class GeneralTrainer(Trainer):
             "Unfolded WMMSE": model_avg_result_wrate_layersum,
         }
         if "avg_layers" in system_results:
-            rate_plots_layersum["WMMSE 100 Trials Avg. Trun."] = torch.sum(system_results["avg_layers"][1:(self.model_hyperparam["num_layers"]+1)], dim=0).mean()
+            rate_plots_layersum["WMMSE 100 Trials Avg. Trun."] = torch.sum(
+                system_results["avg_layers"][1:(self.model_hyperparam["num_layers"] + 1)], dim=0).mean()
 
         if "mrc_layers" in system_results and self.testdata_mrc:
-            rate_plots_layersum["WMMSE MRC Init Avg. Trun."] = torch.sum(system_results["mrc_layers"][1:(self.model_hyperparam["num_layers"]+1)], dim=0).mean()
+            rate_plots_layersum["WMMSE MRC Init Avg. Trun."] = torch.sum(
+                system_results["mrc_layers"][1:(self.model_hyperparam["num_layers"] + 1)], dim=0).mean()
 
         if "zf_layers" in system_results and self.testdata_zf:
-            rate_plots_layersum["WMMSE ZF Init Avg. Trun."] = torch.sum(system_results["zf_layers"][1:(self.model_hyperparam["num_layers"]+1)], dim=0).mean()
+            rate_plots_layersum["WMMSE ZF Init Avg. Trun."] = torch.sum(
+                system_results["zf_layers"][1:(self.model_hyperparam["num_layers"] + 1)], dim=0).mean()
 
         exporter.save_scalars("Test Set Avg. Rates SumLayers", rate_plots_layersum, self.i_step)
 
@@ -742,23 +748,27 @@ class GeneralTrainer(Trainer):
         if "bss_pow_ratio_layers" in system_results:
             power_plots["WMMSE 100 Trials Avg."] = torch.mean(system_results["bss_pow_ratio_layers"][-1])
             power_plots["WMMSE 100 Trials Avg. Truncated"] = \
-                torch.mean(system_results["bss_pow_ratio_layers"][self.model_hyperparam["num_layers"]])  # last layer, avg over bss
+                torch.mean(system_results["bss_pow_ratio_layers"][
+                               self.model_hyperparam["num_layers"]])  # last layer, avg over bss
 
         if "bss_pow_ratio_mrc_layers" in system_results and self.testdata_mrc:
             # print(self.testdata_results["bss_pow_ratio_mrc_layers"].size())
-            power_plots["WMMSE MRC Init Avg."] = torch.mean(system_results["bss_pow_ratio_mrc_layers"][-1])  # last layer, avg over bss
+            power_plots["WMMSE MRC Init Avg."] = torch.mean(
+                system_results["bss_pow_ratio_mrc_layers"][-1])  # last layer, avg over bss
             power_plots["WMMSE MRC Init Avg. Truncated"] = \
-                    torch.mean(system_results["bss_pow_ratio_mrc_layers"][self.model_hyperparam["num_layers"]])
+                torch.mean(system_results["bss_pow_ratio_mrc_layers"][self.model_hyperparam["num_layers"]])
 
         if "bss_pow_ratio_zf_layers" in system_results and self.testdata_zf:
             # print(self.testdata_results["bss_pow_ratio_mrc_layers"].size())
-            power_plots["WMMSE ZF Init Avg."] = torch.mean(system_results["bss_pow_ratio_zf_layers"][-1])  # last layer, avg over bss
+            power_plots["WMMSE ZF Init Avg."] = torch.mean(
+                system_results["bss_pow_ratio_zf_layers"][-1])  # last layer, avg over bss
             power_plots["WMMSE ZF Init Avg. Truncated"] = \
                 torch.mean(system_results["bss_pow_ratio_zf_layers"][self.model_hyperparam["num_layers"]])
 
         if "bss_pow_ratio_best_layers" in system_results:
             # print(self.testdata_results["bss_pow_ratio_mrc_layers"].size())
-            power_plots["WMMSE Best Init Avg."] = torch.mean(system_results["bss_pow_ratio_best_layers"][-1])  # last layer, avg over bss
+            power_plots["WMMSE Best Init Avg."] = torch.mean(
+                system_results["bss_pow_ratio_best_layers"][-1])  # last layer, avg over bss
             power_plots["WMMSE Best Init Avg. Truncated"] = \
                 torch.mean(system_results["bss_pow_ratio_best_layers"][self.model_hyperparam["num_layers"]])
 
@@ -771,26 +781,38 @@ class GeneralTrainer(Trainer):
 
         model_wrate_over_layers = wrate.view(num_layers_winit, -1).mean(1)
         for_plotting = [layer_ax, model_wrate_over_layers.cpu().numpy(), "-*", layer_ax,
-                        system_results["avg_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(1).cpu().numpy(), "-+"]
+                        system_results["avg_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(
+                            1).cpu().numpy(), "-+"]
         legend = ["Unfolded WMMSE", "WMMSE Rand. Init"]
         plotdata = {"Layer": layer_ax,
                     "Unfolded WMMSE": model_wrate_over_layers.cpu().numpy(),
-                    "WMMSE Rand. Init": system_results["avg_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(1).cpu().numpy()}
+                    "WMMSE Rand. Init": system_results["avg_layers"][0:num_layers_winit].view(num_layers_winit,
+                                                                                              -1).mean(1).cpu().numpy()}
 
         if "mrc_layers" in system_results and self.testdata_mrc:
-                for_plotting.extend([layer_ax, system_results["mrc_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(1).cpu().numpy(), "-x"])
-                legend.append("WMMSE MRC Init")
-                plotdata["WMMSE MRC Init"] = system_results["mrc_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(1).cpu().numpy()
+            for_plotting.extend([layer_ax,
+                                 system_results["mrc_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(
+                                     1).cpu().numpy(), "-x"])
+            legend.append("WMMSE MRC Init")
+            plotdata["WMMSE MRC Init"] = system_results["mrc_layers"][0:num_layers_winit].view(num_layers_winit,
+                                                                                               -1).mean(1).cpu().numpy()
 
         if "zf_layers" in system_results and self.testdata_zf:
-                for_plotting.extend([layer_ax, system_results["zf_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(1).cpu().numpy(), "-|"])
-                legend.append("WMMSE ZF Init")
-                plotdata["WMMSE ZF Init"] = system_results["zf_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(1).cpu().numpy()
+            for_plotting.extend([layer_ax,
+                                 system_results["zf_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(
+                                     1).cpu().numpy(), "-|"])
+            legend.append("WMMSE ZF Init")
+            plotdata["WMMSE ZF Init"] = system_results["zf_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(
+                1).cpu().numpy()
 
         if "opt_layers" in system_results:
-                for_plotting.extend([layer_ax, system_results["opt_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(1).cpu().numpy(), "-_"])
-                legend.append("WMMSE Best Init")
-                plotdata["WMMSE Best Init"] = system_results["opt_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(1).cpu().numpy()
+            for_plotting.extend([layer_ax,
+                                 system_results["opt_layers"][0:num_layers_winit].view(num_layers_winit, -1).mean(
+                                     1).cpu().numpy(), "-_"])
+            legend.append("WMMSE Best Init")
+            plotdata["WMMSE Best Init"] = system_results["opt_layers"][0:num_layers_winit].view(num_layers_winit,
+                                                                                                -1).mean(
+                1).cpu().numpy()
 
         exporter.save_figure_data("Avg. Rate over Layers", plotdata, global_step=self.i_step)
 
@@ -822,8 +844,9 @@ class GeneralTrainer(Trainer):
 
         if "results" not in data_dict or True:
             dl_beamformers_wmmse_mrc, _, _, _ = algo.downlink_wmmse_stable(system_data,
-                                                                init_dl_beamformer=algo.downlink_mrc(system_data),
-                                                                num_iter=100)
+                                                                           init_dl_beamformer=algo.downlink_mrc(
+                                                                               system_data),
+                                                                           num_iter=100)
 
             _, wrate_wmmse_mrc_raw = channel.downlink_rate(system_data, dl_beamformers_wmmse_mrc)
             include_all = False
@@ -868,8 +891,10 @@ class GeneralTrainer(Trainer):
             wrate_wmmse_avg_trun = wrate_wmmse_avg_trun.cpu().numpy()
 
             # print(wrate_model.shape, wrate_wmmse_avg.shape, wrate_wmmse_avg_trun.shape)
-            rangemin = np.min(np.concatenate((wrate_model, wrate_wmmse_avg, wrate_wmmse_avg_trun, wrate_wmmse_best, wrate_wmmse_mrc, wrate_wmmse_mrc_trun)))
-            rangemax = np.max(np.concatenate((wrate_model, wrate_wmmse_avg, wrate_wmmse_avg_trun, wrate_wmmse_best, wrate_wmmse_mrc, wrate_wmmse_mrc_trun)))
+            rangemin = np.min(np.concatenate((wrate_model, wrate_wmmse_avg, wrate_wmmse_avg_trun, wrate_wmmse_best,
+                                              wrate_wmmse_mrc, wrate_wmmse_mrc_trun)))
+            rangemax = np.max(np.concatenate((wrate_model, wrate_wmmse_avg, wrate_wmmse_avg_trun, wrate_wmmse_best,
+                                              wrate_wmmse_mrc, wrate_wmmse_mrc_trun)))
 
         if binrange == "auto":
             binrange = (rangemin - 1, rangemax + 1)
@@ -886,7 +911,8 @@ class GeneralTrainer(Trainer):
 
         hist_model, bin_edges_model = np.histogram(wrate_model, bins=num_bins, range=binrange, density=False)
         path_hist_model = os.path.join(export_dir, "model" + "_hist" + "_user" + str(user) + ".csv")
-        np.savetxt(path_hist_model, np.stack([np.concatenate([hist_model, np.zeros(1)]), bin_edges_model]), delimiter=",", fmt="%.3f")
+        np.savetxt(path_hist_model, np.stack([np.concatenate([hist_model, np.zeros(1)]), bin_edges_model]),
+                   delimiter=",", fmt="%.3f")
 
         path_model = os.path.join(export_dir, "model" + "_user" + str(user) + ".csv")
         np.savetxt(path_model, wrate_model, delimiter=",")
@@ -898,17 +924,26 @@ class GeneralTrainer(Trainer):
         np.savetxt(path_wmmse_mrc_trun, wrate_wmmse_mrc_trun, delimiter=",")
 
         if include_all:
-            hist_wmmse_best, bin_edges_wmmse_best = np.histogram(wrate_wmmse_best, bins=num_bins, range=binrange, density=False)
+            hist_wmmse_best, bin_edges_wmmse_best = np.histogram(wrate_wmmse_best, bins=num_bins, range=binrange,
+                                                                 density=False)
             path_hist_wmmse_best = os.path.join(export_dir, "wmmse_best" + "_hist" + "_user" + str(user) + ".csv")
-            np.savetxt(path_hist_wmmse_best, np.stack([np.concatenate([hist_wmmse_best, np.zeros(1)]), bin_edges_wmmse_best]), delimiter=",", fmt="%.3f")
+            np.savetxt(path_hist_wmmse_best,
+                       np.stack([np.concatenate([hist_wmmse_best, np.zeros(1)]), bin_edges_wmmse_best]), delimiter=",",
+                       fmt="%.3f")
 
-            hist_wmmse_avg, bin_edges_wmmse_avg = np.histogram(wrate_wmmse_avg, bins=num_bins, range=binrange, density=False)
+            hist_wmmse_avg, bin_edges_wmmse_avg = np.histogram(wrate_wmmse_avg, bins=num_bins, range=binrange,
+                                                               density=False)
             path_hist_wmmse_avg = os.path.join(export_dir, "wmmse_avg" + "_hist" + "_user" + str(user) + ".csv")
-            np.savetxt(path_hist_wmmse_avg, np.stack([np.concatenate([hist_wmmse_avg, np.zeros(1)]), bin_edges_wmmse_avg]), delimiter=",", fmt="%.3f")
+            np.savetxt(path_hist_wmmse_avg,
+                       np.stack([np.concatenate([hist_wmmse_avg, np.zeros(1)]), bin_edges_wmmse_avg]), delimiter=",",
+                       fmt="%.3f")
 
-            hist_wmmse_mrc, bin_edges_wmmse_mrc = np.histogram(wrate_wmmse_mrc, bins=num_bins, range=binrange, density=False)
+            hist_wmmse_mrc, bin_edges_wmmse_mrc = np.histogram(wrate_wmmse_mrc, bins=num_bins, range=binrange,
+                                                               density=False)
             path_hist_wmmse_mrc = os.path.join(export_dir, "wmmse_mrc" + "_hist" + "_user" + str(user) + ".csv")
-            np.savetxt(path_hist_wmmse_mrc, np.stack([np.concatenate([hist_wmmse_mrc, np.zeros(1)]), bin_edges_wmmse_mrc]), delimiter=",", fmt="%.3f")
+            np.savetxt(path_hist_wmmse_mrc,
+                       np.stack([np.concatenate([hist_wmmse_mrc, np.zeros(1)]), bin_edges_wmmse_mrc]), delimiter=",",
+                       fmt="%.3f")
 
             path_wmmse_avg = os.path.join(export_dir, "wmmse_avg" + "_user" + str(user) + ".csv")
             np.savetxt(path_wmmse_avg, wrate_wmmse_avg, delimiter=",")

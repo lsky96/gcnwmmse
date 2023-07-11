@@ -17,7 +17,7 @@ def gcnwmmse_example_training():
     Note that depending on the values for testdata_num_iter, testdata_num_inits, generating data might take significant
     time.
     """
-    max_num_training_steps = 100
+    max_num_training_steps = 10000
 
     model_parameters = {
             "num_layers": 7,
